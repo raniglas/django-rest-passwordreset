@@ -15,7 +15,8 @@ from rest_framework.viewsets import GenericViewSet
 from django_rest_passwordreset.models import ResetPasswordToken, clear_expired, get_password_reset_token_expiry_time, \
     get_password_reset_lookup_field
 from django_rest_passwordreset.serializers import EmailSerializer, PasswordTokenSerializer, ResetTokenSerializer
-from django_rest_passwordreset.signals import reset_password_token_created, pre_password_reset, post_password_reset
+from django_rest_passwordreset.signals import reset_password_token_created, pre_password_reset, post_password_reset, \
+    reset_password_user_not_found
 
 User = get_user_model()
 
@@ -144,6 +145,7 @@ class ResetPasswordRequestToken(GenericAPIView):
         # No active user found, raise a validation error
         # but not if DJANGO_REST_PASSWORDRESET_NO_INFORMATION_LEAKAGE == True
         if not active_user_found and not getattr(settings, 'DJANGO_REST_PASSWORDRESET_NO_INFORMATION_LEAKAGE', False):
+            reset_password_user_not_found.send(sender=self.__class__, email=email)
             raise exceptions.ValidationError({
                 'email': [_(
                     "We couldn't find an account associated with that email. Please try a different e-mail address.")],

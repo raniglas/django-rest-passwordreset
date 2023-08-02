@@ -20,3 +20,8 @@ pre_password_reset = Signal()
 Signal arguments: user
 """
 post_password_reset = Signal()
+
+"""
+Signal arguments: e-mail
+"""
+reset_password_user_not_found = Signal()
