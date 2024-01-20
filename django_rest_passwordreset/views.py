@@ -114,6 +114,17 @@ class ResetPasswordRequestToken(GenericAPIView):
     throttle_classes = ()
     permission_classes = ()
     serializer_class = EmailSerializer
+    
+    def check_for_eligible_users(self, users):
+        # iterate over all users and check if there is any user that is active
+        # also check whether the password can be changed (is useable), as there could be users that are not allowed
+        # to change their password (e.g., LDAP user)
+        for user in users:
+            if user.eligible_for_reset():
+                return True
+
+        return False
+        
 
     def post(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data)
@@ -132,24 +143,22 @@ class ResetPasswordRequestToken(GenericAPIView):
         # find a user by email address (case insensitive search)
         users = User.objects.filter(**{'{}__iexact'.format(get_password_reset_lookup_field()): email})
 
-        active_user_found = False
-
-        # iterate over all users and check if there is any user that is active
-        # also check whether the password can be changed (is useable), as there could be users that are not allowed
-        # to change their password (e.g., LDAP user)
-        for user in users:
-            if user.eligible_for_reset():
-                active_user_found = True
-                break
+        active_user_found = self.check_for_eligible_users(users)
 
         # No active user found, raise a validation error
         # but not if DJANGO_REST_PASSWORDRESET_NO_INFORMATION_LEAKAGE == True
-        if not active_user_found and not getattr(settings, 'DJANGO_REST_PASSWORDRESET_NO_INFORMATION_LEAKAGE', False):
-            reset_password_user_not_found.send(sender=self.__class__, email=email)
-            raise exceptions.ValidationError({
-                'email': [_(
-                    "We couldn't find an account associated with that email. Please try a different e-mail address.")],
-            })
+        if not active_user_found:
+            ret = reset_password_user_not_found.send(sender=self.__class__, email=email)
+            if ret and len(ret) > 0 and len(ret[0]) > 1 and ret[0][1] is True:
+                # if reset_password_user_not_found, it created a new user, so search for it
+                users = User.objects.filter(**{'{}__iexact'.format(get_password_reset_lookup_field()): email})
+                active_user_found = self.check_for_eligible_users(users)
+            
+            if not active_user_found and not getattr(settings, 'DJANGO_REST_PASSWORDRESET_NO_INFORMATION_LEAKAGE', False):
+                raise exceptions.ValidationError({
+                    'email': [_(
+                        "We couldn't find an account associated with that email. Please try a different e-mail address.")],
+                })
 
         # last but not least: iterate over all users that are active and can change their password
         # and create a Reset Password Token and send a signal with the created token
